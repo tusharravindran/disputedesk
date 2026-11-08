@@ -15,6 +15,7 @@ Small merchants lose disputes they should win. They don't know which evidence Pa
 - **Stress-tested by a second, adversarial agent.** Before the merchant sees a draft, a simulated PayPal dispute reviewer ([`src/lib/adjudicator.ts`](src/lib/adjudicator.ts)) argues the buyer's side, predicts the ruling and the seller's win probability, and raises objections, each with a severity and a fix. If its objections are serious, the investigator revises the draft once and the reviewer scores it again. In sample dispute `PP-D-DEMO-0005`, tracking says "delivered" but to a different city: the first draft says fight, the reviewer predicts a 5% chance of winning, and the AI switches to refund instead of fighting a case it would lose.
 - **A recommendation the merchant can act on.** It gives a verdict with calibrated confidence, the evidence to submit, the risks, the facts it relied on, and an editable message to the buyer.
 - **Human in the loop.** Nothing reaches PayPal until the merchant clicks approve. That single endpoint calls `provide-evidence`, `accept-claim` or `make-offer`. It is protected against double-submits, validates offers against the disputed amount, and enforces PayPal's stage rules.
+- **Bring your own PayPal sandbox.** On the **Settings** page, anyone with the admin password can connect their own PayPal sandbox app. Keys are validated with PayPal before saving, and the secret is stored AES-256-GCM encrypted. Switching to a different app resets the workspace, re-adds the sample disputes, and syncs the new account's disputes, rebuilding each order and its tracking from PayPal.
 - **Impact at a glance.** The dashboard shows money at risk, money defended, disputes handled, and the agent's average investigation time.
 - **A demo store with real checkout.** It runs real PayPal Checkout (Orders v2) in the sandbox, so you can create real orders and dispute them.
 
@@ -58,6 +59,8 @@ flowchart LR
 | Orders v2 | Demo store checkout: create and capture |
 | Disputes v1 | List and get disputes, provide evidence, accept claim, make offer |
 | Webhooks v1 | Receive `CUSTOMER.DISPUTE.*` events, verify signatures |
+| Tracking v1 | Register shipment tracking at checkout; read it back to rebuild orders |
+| Payments v2 | Look up a disputed capture and its order |
 | JS SDK | PayPal buttons in the demo store |
 
 **Stack:** Next.js 15 (App Router) and TypeScript, Tailwind CSS, PostgreSQL (`postgres.js`), Zod, and the Google Gemini Interactions API (free tier).
@@ -96,7 +99,7 @@ In your PayPal app's settings, add a webhook pointing to `https://<your-host>/ap
 The repo includes a [Render Blueprint](render.yaml) that defines a free web service and a free PostgreSQL database.
 
 1. In Render, choose **New → Blueprint**, connect this repo, and apply it.
-2. When prompted, enter `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `GEMINI_API_KEY`.
+2. When prompted, enter `GEMINI_API_KEY` and an `ADMIN_PASSWORD`, plus `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` (or leave those empty and connect PayPal later on the Settings page). `SETTINGS_SECRET` is generated automatically.
 3. On first boot the app creates its tables and seeds the sample disputes (`SEED_DEMO=true`).
 4. Add a PayPal webhook pointing to `https://<your-app>.onrender.com/api/webhooks/paypal`, then set `PAYPAL_WEBHOOK_ID` in Render.
 

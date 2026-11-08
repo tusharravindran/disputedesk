@@ -1,9 +1,10 @@
 import { CATALOG } from "@/lib/catalog";
+import { getPayPalConfig } from "@/lib/config";
 import { Checkout } from "./checkout";
 
 export const dynamic = "force-dynamic";
 
-export default function StorePage() {
+export default async function StorePage() {
   return (
     <div className="space-y-6">
       <div>
@@ -12,7 +13,7 @@ export default function StorePage() {
           Demo merchant store. Pay with a PayPal <b>sandbox</b> buyer account to create real orders you can dispute.
         </p>
       </div>
-      <Checkout catalog={CATALOG} clientId={process.env.PAYPAL_CLIENT_ID ?? ""} />
+      <Checkout catalog={CATALOG} clientId={(await getPayPalConfig()).clientId} />
     </div>
   );
 }

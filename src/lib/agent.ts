@@ -205,7 +205,13 @@ const fnResult = (c: FunctionCall, result: unknown): FunctionResult => ({
 });
 
 /** Runs the investigation, persisting progress to agent_runs so the UI can show the trace. */
-export async function investigate(disputeId: string, onEvent: (e: AgentEvent) => void = () => {}): Promise<number> {
+export async function investigate(disputeId: string, listener: (e: AgentEvent) => void = () => {}): Promise<number> {
+  // Progress reporting must never fail the investigation itself (e.g. the viewer closed the page).
+  const onEvent = (e: AgentEvent) => {
+    try {
+      listener(e);
+    } catch {}
+  };
   const [run] = await sql`INSERT INTO agent_runs (dispute_id, status) VALUES (${disputeId}, 'running') RETURNING id`;
   const trace: TraceEntry[] = [];
   const save = (fields: Record<string, unknown>) =>

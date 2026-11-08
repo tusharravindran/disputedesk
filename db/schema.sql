@@ -71,3 +71,10 @@ ALTER TABLE disputes   ADD COLUMN IF NOT EXISTS outcome TEXT;   -- local view: r
 CREATE INDEX IF NOT EXISTS agent_runs_dispute_idx ON agent_runs (dispute_id, id DESC);
 CREATE INDEX IF NOT EXISTS dispute_actions_dispute_idx ON dispute_actions (dispute_id, id DESC);
 CREATE INDEX IF NOT EXISTS orders_buyer_email_idx ON orders (buyer_email);
+
+-- v4: credentials and options managed from the Settings page (secrets are encrypted by the app)
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

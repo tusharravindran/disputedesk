@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Evidence = { type: string; description: string; carrier?: string; tracking_number?: string };
 type Verdict = "fight" | "refund" | "offer";
@@ -132,6 +132,18 @@ export function Investigator({
 }: { disputeId: string; amount: number; isDemo: boolean; initialRun: Run | null; sent: SentAction | null }) {
   const router = useRouter();
   const [run, setRun] = useState<Run | null>(initialRun);
+
+  // A run started before a page reload keeps going on the server; refresh until it finishes.
+  const runningElsewhere = initialRun?.status === "running";
+  useEffect(() => {
+    setRun(initialRun);
+    if (initialRun?.draft) setMessage(initialRun.draft.message_to_buyer);
+  }, [initialRun]);
+  useEffect(() => {
+    if (!runningElsewhere) return;
+    const t = setInterval(() => router.refresh(), 3000);
+    return () => clearInterval(t);
+  }, [runningElsewhere, router]);
   const [live, setLive] = useState<TraceEntry[] | null>(null);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +258,12 @@ export function Investigator({
               </li>
             )}
           </ol>
+        )}
+        {runningElsewhere && !busy && (
+          <p className="mt-3 flex items-center gap-2 rounded-lg bg-indigo-50 p-2 text-sm text-indigo-800">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+            Investigation in progress. This page updates automatically.
+          </p>
         )}
         {run?.status === "error" && !busy && (
           <p className="mt-3 rounded-lg bg-red-50 p-2 text-sm text-red-700">Investigation failed: {run.summary}</p>

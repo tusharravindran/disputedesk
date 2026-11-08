@@ -22,6 +22,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </Link>
             <Link href="/" className="text-zinc-600 hover:text-zinc-900">Disputes</Link>
             <Link href="/store" className="text-zinc-600 hover:text-zinc-900">Demo store</Link>
+            <Link href="/settings" className="ml-auto text-zinc-600 hover:text-zinc-900">Settings</Link>
           </nav>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>

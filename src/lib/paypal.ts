@@ -1,31 +1,35 @@
 // Minimal PayPal REST client. Docs: https://developer.paypal.com/api/rest
 import "server-only";
+import { getPayPalConfig } from "@/lib/config";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PP = Record<string, any>;
 
-const BASE = process.env.PAYPAL_API_BASE ?? "https://api-m.sandbox.paypal.com";
+let cached: { clientId: string; token: string; expiresAt: number } | null = null;
 
-let cached: { token: string; expiresAt: number } | null = null;
-
-async function accessToken(): Promise<string> {
-  if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token;
-  const id = process.env.PAYPAL_CLIENT_ID;
-  const secret = process.env.PAYPAL_CLIENT_SECRET;
-  if (!id || !secret) throw new Error("PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET not set");
-  const res = await fetch(`${BASE}/v1/oauth2/token`, {
+/** Exchanges client credentials for an access token. Also used to validate keys before saving them. */
+export async function requestToken(clientId: string, clientSecret: string, apiBase: string) {
+  const res = await fetch(`${apiBase}/v1/oauth2/token`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`PayPal auth failed: ${res.status} ${await res.text()}`);
-  const json = (await res.json()) as { access_token: string; expires_in: number };
-  cached = { token: json.access_token, expiresAt: Date.now() + json.expires_in * 1000 };
-  return json.access_token;
+  if (!res.ok) throw new PayPalError(res.status, await res.json().catch(() => ({})), "/v1/oauth2/token");
+  return (await res.json()) as { access_token: string; expires_in: number; app_id?: string };
+}
+
+async function accessToken(): Promise<{ token: string; apiBase: string }> {
+  const cfg = await getPayPalConfig();
+  if (!cfg.clientId || !cfg.clientSecret) throw new Error("PayPal is not connected - add your keys on the Settings page");
+  if (!cached || cached.clientId !== cfg.clientId || Date.now() > cached.expiresAt - 60_000) {
+    const t = await requestToken(cfg.clientId, cfg.clientSecret, cfg.apiBase);
+    cached = { clientId: cfg.clientId, token: t.access_token, expiresAt: Date.now() + t.expires_in * 1000 };
+  }
+  return { token: cached.token, apiBase: cfg.apiBase };
 }
 
 export class PayPalError extends Error {
@@ -38,14 +42,15 @@ export async function paypal<T = unknown>(
   path: string,
   init: { method?: string; body?: unknown; form?: FormData } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${await accessToken()}` };
+  const { token, apiBase } = await accessToken();
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   let body: BodyInit | undefined;
   if (init.form) body = init.form;
   else if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.body);
   }
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${apiBase}${path}`, {
     method: init.method ?? (body ? "POST" : "GET"),
     headers,
     body,
@@ -124,7 +129,7 @@ export const makeOffer = (id: string, note: string, amount: { currency_code: str
   });
 
 export async function verifyWebhook(headers: Headers, rawBody: string): Promise<boolean> {
-  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  const { webhookId } = await getPayPalConfig();
   if (!webhookId) return false;
   const res = await paypal<{ verification_status: string }>("/v1/notifications/verify-webhook-signature", {
     body: {

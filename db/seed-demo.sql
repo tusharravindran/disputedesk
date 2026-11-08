@@ -1,4 +1,5 @@
 -- Sample disputes for development and as a demo fallback. Clearly marked is_demo; real disputes come from PayPal.
+DELETE FROM dispute_actions WHERE dispute_id LIKE 'PP-D-DEMO-%';
 DELETE FROM agent_runs WHERE dispute_id LIKE 'PP-D-DEMO-%';
 DELETE FROM disputes WHERE is_demo; DELETE FROM orders WHERE is_demo;
 

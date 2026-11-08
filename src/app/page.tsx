@@ -1,4 +1,6 @@
 import { sql } from "@/lib/db";
+import Link from "next/link";
+import { REASONS } from "@/lib/reasons";
 import { SyncButton } from "./sync-button";
 
 export const dynamic = "force-dynamic";
@@ -6,23 +8,16 @@ export const dynamic = "force-dynamic";
 type Row = {
   id: string; reason: string | null; status: string | null; stage: string | null;
   amount: string | null; currency: string | null; respond_by: Date | null; created_at: Date;
-};
-
-const REASONS: Record<string, string> = {
-  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: "Item not received",
-  MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED: "Not as described",
-  UNAUTHORISED: "Unauthorized",
-  CREDIT_NOT_PROCESSED: "Credit not processed",
-  DUPLICATE_TRANSACTION: "Duplicate",
-  INCORRECT_AMOUNT: "Incorrect amount",
-  PAYMENT_BY_OTHER_MEANS: "Paid by other means",
-  CANCELED_RECURRING_BILLING: "Canceled subscription",
-  OTHER: "Other",
+  is_demo: boolean; verdict: string | null; confidence: number | null;
 };
 
 export default async function DisputesPage() {
   const [disputes, [stats]] = await Promise.all([
-    sql<Row[]>`SELECT id, reason, status, stage, amount, currency, respond_by, created_at FROM disputes ORDER BY created_at DESC`,
+    sql<Row[]>`
+      SELECT d.id, d.reason, d.status, d.stage, d.amount, d.currency, d.respond_by, d.created_at, d.is_demo, r.verdict, r.confidence
+      FROM disputes d
+      LEFT JOIN LATERAL (SELECT verdict, confidence FROM agent_runs WHERE dispute_id = d.id AND status = 'done' ORDER BY id DESC LIMIT 1) r ON true
+      ORDER BY d.is_demo, d.created_at DESC`,
     sql<{ open: number; at_risk: string | null; orders: number }[]>`
       SELECT (SELECT count(*)::int FROM disputes WHERE status NOT IN ('RESOLVED')) AS open,
              (SELECT sum(amount) FROM disputes WHERE status NOT IN ('RESOLVED')) AS at_risk,
@@ -58,22 +53,23 @@ export default async function DisputesPage() {
             <tr>
               <th className="px-4 py-2">Dispute</th><th className="px-4 py-2">Reason</th>
               <th className="px-4 py-2">Amount</th><th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Respond by</th>
+              <th className="px-4 py-2">Respond by</th><th className="px-4 py-2">AI verdict</th>
             </tr>
           </thead>
           <tbody>
             {disputes.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-zinc-500">
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
                 No disputes yet. Buy something in the demo store, then open a dispute as the sandbox buyer.
               </td></tr>
             )}
             {disputes.map((d) => (
               <tr key={d.id} className="border-t border-zinc-100">
-                <td className="px-4 py-2 font-mono text-xs">{d.id}</td>
+                <td className="px-4 py-2 font-mono text-xs"><Link href={`/disputes/${d.id}`} className="text-indigo-600 hover:underline">{d.id}</Link>{d.is_demo && <span className="ml-1 rounded bg-zinc-100 px-1 text-[10px] text-zinc-500">sample</span>}</td>
                 <td className="px-4 py-2">{REASONS[d.reason ?? ""] ?? d.reason}</td>
                 <td className="px-4 py-2">${Number(d.amount ?? 0).toFixed(2)}</td>
                 <td className="px-4 py-2"><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{d.status}</span></td>
                 <td className="px-4 py-2 text-zinc-500">{d.respond_by ? new Date(d.respond_by).toLocaleDateString() : "—"}</td>
+                <td className="px-4 py-2">{d.verdict ? <span className="capitalize">{d.verdict} <span className="text-zinc-400">· {d.confidence}%</span></span> : <span className="text-zinc-400">—</span>}</td>
               </tr>
             ))}
           </tbody>

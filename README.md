@@ -2,7 +2,9 @@
 
 **An AI dispute copilot for small PayPal merchants.** When a buyer opens a PayPal dispute, DisputeDesk investigates it, gathering the dispute, the original order, carrier tracking and the buyer's history. It then recommends whether to **fight, refund or make an offer**, drafts the evidence and the message, and sends the response through PayPal's Disputes API once the merchant approves it.
 
-Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
+**Live demo: [disputedesk.tushar.pro](https://disputedesk.tushar.pro)** (PayPal sandbox, with sample disputes included). Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
+
+> The free hosting tier sleeps when idle, so the first page load can take about 50 seconds.
 
 ## The problem
 

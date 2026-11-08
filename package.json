@@ -6,14 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:setup": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -f db/schema.sql"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
+    "@paypal/react-paypal-js": "^10.6.1",
     "next": "15.5.4",
     "postgres": "^4.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "server-only": "^0.0.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

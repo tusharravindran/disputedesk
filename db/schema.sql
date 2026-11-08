@@ -1,0 +1,47 @@
+-- DisputeDesk schema. Apply with: npm run db:setup
+CREATE TABLE IF NOT EXISTS orders (
+  id            TEXT PRIMARY KEY,            -- PayPal order id
+  capture_id    TEXT UNIQUE,                 -- PayPal capture (transaction) id
+  status        TEXT NOT NULL,
+  amount        NUMERIC(10,2) NOT NULL,
+  currency      TEXT NOT NULL DEFAULT 'USD',
+  items         JSONB NOT NULL,
+  buyer_email   TEXT,
+  shipping      JSONB,
+  tracking      JSONB,                       -- {carrier, number, status, delivered_at}
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS disputes (
+  id               TEXT PRIMARY KEY,         -- PayPal dispute id (PP-D-...)
+  reason           TEXT,
+  status           TEXT,
+  stage            TEXT,
+  amount           NUMERIC(10,2),
+  currency         TEXT,
+  capture_id       TEXT,
+  respond_by       TIMESTAMPTZ,
+  raw              JSONB NOT NULL,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id          TEXT PRIMARY KEY,              -- PayPal event id (idempotency)
+  event_type  TEXT NOT NULL,
+  verified    BOOLEAN NOT NULL,
+  payload     JSONB NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id           BIGSERIAL PRIMARY KEY,
+  dispute_id   TEXT NOT NULL REFERENCES disputes(id),
+  status       TEXT NOT NULL,                -- running | done | error
+  verdict      TEXT,                         -- fight | refund | offer
+  confidence   INT,
+  summary      TEXT,
+  draft        JSONB,                        -- proposed PayPal action + evidence
+  trace        JSONB NOT NULL DEFAULT '[]',  -- tool calls for the trace view
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

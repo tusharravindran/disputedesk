@@ -6,7 +6,13 @@ import { saveDispute } from "@/lib/disputes";
 
 export async function POST(req: Request) {
   const raw = await req.text();
-  const event = JSON.parse(raw);
+  let event: { id?: string; event_type?: string; resource?: { dispute_id?: string } };
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
+  }
+  if (!event.id || !event.event_type) return NextResponse.json({ error: "not a PayPal event" }, { status: 400 });
 
   let verified = false;
   try {
@@ -14,23 +20,21 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error("[webhook] verification error", e);
   }
-  // In production, unverified events are stored for inspection but never acted on.
-  const allowUnverified = process.env.ALLOW_UNVERIFIED_WEBHOOKS === "true";
 
   const inserted = await sql`
     INSERT INTO webhook_events (id, event_type, verified, payload)
-    VALUES (${event.id}, ${event.event_type}, ${verified}, ${sql.json(event)})
+    VALUES (${event.id}, ${event.event_type}, ${verified}, ${sql.json(event as never)})
     ON CONFLICT (id) DO NOTHING RETURNING id`;
   if (inserted.length === 0) return NextResponse.json({ ok: true, duplicate: true });
-  if (!verified && !allowUnverified) return NextResponse.json({ ok: true, ignored: "unverified" });
 
-  if (String(event.event_type).startsWith("CUSTOMER.DISPUTE.")) {
-    const id = event.resource?.dispute_id;
-    if (id) {
-      await saveDispute(await getDispute(id)); // re-fetch: webhook payloads can be partial
-      // New dispute: investigate in the background so the merchant opens it already analyzed.
-      if (event.event_type === "CUSTOMER.DISPUTE.CREATED") after(() => investigate(id).then(() => undefined));
-    }
+  // Unverified events are kept for inspection but never acted on (local testing can opt out).
+  if (!verified && process.env.ALLOW_UNVERIFIED_WEBHOOKS !== "true")
+    return NextResponse.json({ ok: true, ignored: "unverified" });
+
+  const disputeId = event.resource?.dispute_id;
+  if (event.event_type.startsWith("CUSTOMER.DISPUTE.") && disputeId) {
+    await saveDispute(await getDispute(disputeId)); // webhook payloads can be partial; fetch the full dispute
+    if (event.event_type === "CUSTOMER.DISPUTE.CREATED") after(() => investigate(disputeId).then(() => undefined));
   }
   return NextResponse.json({ ok: true });
 }

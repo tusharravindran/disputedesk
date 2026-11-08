@@ -12,31 +12,34 @@ const Body = z.object({
 });
 
 const OUTCOME = { fight: "responded_fight", refund: "refunded", offer: "offered" } as const;
+const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
 /** Merchant-approved response. This is the only code path that changes anything on PayPal. */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const parsed = Body.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  const parsed = Body.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return bad("invalid request");
   const { action, message, offer_amount } = parsed.data;
 
-  const [d] = await sql`SELECT id, amount, currency, stage, outcome, is_demo, raw FROM disputes WHERE id = ${id}`;
-  if (!d) return NextResponse.json({ error: "dispute not found" }, { status: 404 });
-  if (d.outcome) return NextResponse.json({ error: "a response was already sent for this dispute" }, { status: 409 });
+  const [d] = await sql`SELECT id, amount, currency, stage, outcome, is_demo FROM disputes WHERE id = ${id}`;
+  if (!d) return bad("dispute not found", 404);
 
   const [run] = await sql`SELECT id, draft FROM agent_runs WHERE dispute_id = ${id} AND status = 'done' ORDER BY id DESC LIMIT 1`;
-  const rec = run ? Recommendation.parse(run.draft) : null;
+  const rec = run ? Recommendation.safeParse(run.draft).data : undefined;
 
-  if (action === "fight" && !rec?.evidence.length)
-    return NextResponse.json({ error: "no evidence to submit - run the investigation first" }, { status: 400 });
+  if (action === "fight" && !rec?.evidence.length) return bad("no evidence to submit - run the investigation first");
   if (action === "offer") {
-    if (!offer_amount) return NextResponse.json({ error: "offer amount required" }, { status: 400 });
+    if (!offer_amount) return bad("offer amount required");
     if (Number(offer_amount) <= 0 || Number(offer_amount) >= Number(d.amount))
-      return NextResponse.json({ error: "offer must be more than 0 and less than the disputed amount" }, { status: 400 });
-    if (d.stage && d.stage !== "INQUIRY")
-      return NextResponse.json({ error: "PayPal only allows offers during the INQUIRY stage" }, { status: 400 });
+      return bad("offer must be more than 0 and less than the disputed amount");
+    if (d.stage && d.stage !== "INQUIRY") return bad("PayPal only allows offers during the INQUIRY stage");
   }
 
+  // Claim the dispute atomically so a double click can never send two responses to PayPal.
+  const [claimed] = await sql`UPDATE disputes SET outcome = 'sending' WHERE id = ${id} AND outcome IS NULL RETURNING id`;
+  if (!claimed) return bad("a response was already sent for this dispute", 409);
+
+  const currency = d.currency ?? "USD";
   const evidences: EvidenceInput[] =
     action === "fight"
       ? rec!.evidence.map((e) => ({
@@ -47,7 +50,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             : {}),
         }))
       : [];
-  const currency = d.currency ?? "USD";
   const amount = action === "refund" ? Number(d.amount) : action === "offer" ? Number(offer_amount) : 0;
   const request =
     action === "fight" ? { evidences }
@@ -67,8 +69,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       status = "sent";
     } catch (e) {
       status = "failed";
-      error = e instanceof PayPalError ? JSON.stringify(e.body) : String(e);
       response = e instanceof PayPalError ? e.body : null;
+      error = e instanceof PayPalError ? JSON.stringify(e.body) : String(e);
     }
   }
 
@@ -77,9 +79,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     VALUES (${id}, ${run?.id ?? null}, ${action}, ${amount}, ${message}, ${sql.json(request)},
             ${sql.json((response ?? null) as never)}, ${status}, ${error})`;
 
-  if (status === "failed") return NextResponse.json({ error: "PayPal rejected the response", details: response }, { status: 502 });
+  if (status === "failed") {
+    await sql`UPDATE disputes SET outcome = NULL WHERE id = ${id}`;
+    return NextResponse.json({ error: "PayPal rejected the response", details: response }, { status: 502 });
+  }
 
   await sql`UPDATE disputes SET outcome = ${OUTCOME[action]}, updated_at = now() WHERE id = ${id}`;
-  if (!d.is_demo) await saveDispute(await getDispute(id)).catch(() => {}); // pull PayPal's new status
+  if (!d.is_demo) await saveDispute(await getDispute(id)).catch((e) => console.error("[respond] refresh failed", e));
   return NextResponse.json({ ok: true, status });
 }

@@ -67,3 +67,7 @@ CREATE TABLE IF NOT EXISTS dispute_actions (
 );
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
 ALTER TABLE disputes   ADD COLUMN IF NOT EXISTS outcome TEXT;   -- local view: responded_fight | refunded | offered | won | lost
+
+CREATE INDEX IF NOT EXISTS agent_runs_dispute_idx ON agent_runs (dispute_id, id DESC);
+CREATE INDEX IF NOT EXISTS dispute_actions_dispute_idx ON dispute_actions (dispute_id, id DESC);
+CREATE INDEX IF NOT EXISTS orders_buyer_email_idx ON orders (buyer_email);

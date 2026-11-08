@@ -7,7 +7,7 @@ const Body = z.object({ items: z.array(z.object({ sku: z.string(), quantity: z.n
 
 // Prices come from the server-side catalog, never from the client.
 export async function POST(req: Request) {
-  const parsed = Body.safeParse(await req.json());
+  const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid cart" }, { status: 400 });
   if (parsed.data.items.some((i) => !findProduct(i.sku)))
     return NextResponse.json({ error: "unknown product" }, { status: 400 });

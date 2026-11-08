@@ -6,7 +6,7 @@ import { useState } from "react";
 type Evidence = { type: string; description: string; carrier?: string; tracking_number?: string };
 type Verdict = "fight" | "refund" | "offer";
 type Draft = {
-  verdict: Verdict; confidence: number; summary: string;
+  verdict: Verdict; confidence: number; summary: string; facts?: Array<{ source: string; fact: string }>;
   evidence: Evidence[]; risks: string[]; offer_amount?: string; message_to_buyer: string;
 };
 type TraceEntry = { tool: string; args: Record<string, unknown>; result: unknown; ms: number };
@@ -21,8 +21,11 @@ const TOOL_LABELS: Record<string, string> = {
   get_order: "Pulled the original PayPal order",
   get_shipment_tracking: "Checked carrier tracking",
   get_buyer_history: "Looked up buyer history",
+  fact_check: "Fact-checked against the data",
   submit_recommendation: "Wrote recommendation",
 };
+
+const failedCheck = (t: TraceEntry) => t.tool === "fact_check" && (t.result as { passed?: boolean })?.passed === false;
 
 const VERDICT_STYLE: Record<Verdict, { label: string; cls: string; button: string }> = {
   fight: { label: "Fight with evidence", cls: "bg-emerald-600", button: "Submit evidence to PayPal" },
@@ -30,7 +33,7 @@ const VERDICT_STYLE: Record<Verdict, { label: string; cls: string; button: strin
   offer: { label: "Offer partial refund", cls: "bg-indigo-600", button: "Send offer via PayPal" },
 };
 
-/** Minimal SSE reader for a POST response body. */
+/** Parses Server-Sent Events from a fetch body (EventSource only supports GET). */
 async function* readSSE(res: Response) {
   const reader = res.body!.getReader();
   const dec = new TextDecoder();
@@ -70,6 +73,11 @@ export function Investigator({
     setThinking(true);
     try {
       const res = await fetch(`/api/disputes/${disputeId}/investigate`, { method: "POST" });
+      if (!res.ok || !res.body) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error ?? `Investigation failed (HTTP ${res.status})`);
+        return;
+      }
       for await (const { event, data } of readSSE(res)) {
         if (event === "reset") setLive([]); // restarted on a fallback model
         if (event === "thinking") setThinking(true);
@@ -142,8 +150,12 @@ export function Investigator({
             {trace.map((t, i) => (
               <li key={i} className="animate-[fadein_.3s_ease-out] rounded-lg border border-zinc-100">
                 <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(open === i ? null : i)}>
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700">✓</span>
-                  <span>{TOOL_LABELS[t.tool] ?? t.tool}</span>
+                  {failedCheck(t) ? (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-xs text-amber-700">!</span>
+                  ) : (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700">✓</span>
+                  )}
+                  <span>{failedCheck(t) ? "Fact-check caught a problem, AI corrected it" : (TOOL_LABELS[t.tool] ?? t.tool)}</span>
                   <span className="ml-auto font-mono text-xs text-zinc-400">{t.tool}</span>
                 </button>
                 {open === i && (
@@ -188,6 +200,22 @@ export function Investigator({
                 ))}
               </ul>
             </div>
+          )}
+
+          {draft.facts && draft.facts.length > 0 && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Facts used ({draft.facts.length}) · each verified against PayPal and store data
+              </summary>
+              <ul className="mt-1 space-y-0.5">
+                {draft.facts.map((f, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="shrink-0 font-mono text-xs text-zinc-400">{f.source}</span>
+                    <span>{f.fact}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
 
           {draft.risks.length > 0 && (

@@ -1,7 +1,6 @@
-// Minimal PayPal REST client (server-only). Docs: https://developer.paypal.com/api/rest
+// Minimal PayPal REST client. Docs: https://developer.paypal.com/api/rest
 import "server-only";
 
-// PayPal responses are large, loosely-typed JSON; the agent reads them as data.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PP = Record<string, any>;
 
@@ -53,12 +52,16 @@ export async function paypal<T = unknown>(
     cache: "no-store",
   });
   const text = await res.text();
-  const json = text ? JSON.parse(text) : {};
+  let json: unknown = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
+  }
   if (!res.ok) throw new PayPalError(res.status, json, path);
   return json as T;
 }
 
-// ---------- Orders v2 ----------
 export type OrderItem = { name: string; sku: string; price: string; quantity: number };
 
 export function createOrder(items: OrderItem[], shipping?: { name: string; address: Record<string, string> }) {
@@ -90,11 +93,6 @@ export function createOrder(items: OrderItem[], shipping?: { name: string; addre
 export const captureOrder = (id: string) =>
   paypal<PP>(`/v2/checkout/orders/${id}/capture`, { method: "POST", body: {} });
 
-export const getOrder = (id: string) => paypal<PP>(`/v2/checkout/orders/${id}`);
-
-export const getCapture = (id: string) => paypal<PP>(`/v2/payments/captures/${id}`);
-
-// ---------- Disputes v1 ----------
 export const listDisputes = () =>
   paypal<{ items?: Array<PP> }>("/v1/customer/disputes?page_size=50");
 
@@ -125,7 +123,6 @@ export const makeOffer = (id: string, note: string, amount: { currency_code: str
     body: { note, offer_amount: amount, offer_type: "REFUND" },
   });
 
-// ---------- Webhooks v1 ----------
 export async function verifyWebhook(headers: Headers, rawBody: string): Promise<boolean> {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID;
   if (!webhookId) return false;

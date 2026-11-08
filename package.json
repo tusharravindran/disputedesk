@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:setup": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -f db/schema.sql",
-    "db:seed": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -q -f db/seed-demo.sql"
+    "db:seed": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -q -f db/seed-demo.sql",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

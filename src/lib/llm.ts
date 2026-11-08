@@ -39,7 +39,7 @@ export class LLMError extends Error {
 
 async function call(model: string, body: Record<string, unknown>): Promise<Interaction> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new LLMError(500, "GEMINI_API_KEY not set");
+  if (!key) throw new Error("GEMINI_API_KEY is not set");
   const res = await fetch(URL, {
     method: "POST",
     headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
@@ -75,9 +75,9 @@ export async function interact(opts: {
     try {
       return await call(model, body);
     } catch (e) {
-      const status = e instanceof LLMError ? e.status : 0;
-      // Brief overloads are worth a retry; quota errors (429) are not - the caller switches model.
-      if ((status === 503 || status === 500 || status === 0) && attempt < 2) {
+      // Brief overloads are worth a retry; quota errors (429) are not - the agent switches model instead.
+      const retryable = e instanceof LLMError ? e.status === 503 || e.status === 500 : e instanceof TypeError;
+      if (retryable && attempt < 2) {
         await sleep(1500 * 2 ** attempt);
         continue;
       }
@@ -85,9 +85,3 @@ export async function interact(opts: {
     }
   }
 }
-
-export const outputText = (i: Interaction) =>
-  i.steps
-    .filter((s): s is Extract<Step, { type: "model_output" }> => s.type === "model_output")
-    .flatMap((s) => s.content.map((c) => c.text ?? ""))
-    .join("");

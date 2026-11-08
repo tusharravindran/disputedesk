@@ -2,7 +2,6 @@ import "server-only";
 import { sql } from "@/lib/db";
 import { getDispute, listDisputes, type PP } from "@/lib/paypal";
 
-/** Upsert a full PayPal dispute object into the local DB. */
 export async function saveDispute(d: PP) {
   const tx = d.disputed_transactions?.[0] ?? {};
   await sql`

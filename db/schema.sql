@@ -50,3 +50,20 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE disputes   ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE orders     ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
+
+-- v3: merchant-approved responses sent to PayPal
+CREATE TABLE IF NOT EXISTS dispute_actions (
+  id           BIGSERIAL PRIMARY KEY,
+  dispute_id   TEXT NOT NULL REFERENCES disputes(id),
+  run_id       BIGINT REFERENCES agent_runs(id),
+  action       TEXT NOT NULL,                -- fight | refund | offer
+  amount       NUMERIC(10,2),                -- refund/offer amount (money given up)
+  message      TEXT NOT NULL,
+  request      JSONB NOT NULL,
+  response     JSONB,
+  status       TEXT NOT NULL,                -- sent | simulated | failed
+  error        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+ALTER TABLE disputes   ADD COLUMN IF NOT EXISTS outcome TEXT;   -- local view: responded_fight | refunded | offered | won | lost

@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { investigate } from "@/lib/agent";
 import { sql } from "@/lib/db";
 import { getDispute, verifyWebhook } from "@/lib/paypal";
 import { saveDispute } from "@/lib/disputes";
@@ -25,7 +26,11 @@ export async function POST(req: Request) {
 
   if (String(event.event_type).startsWith("CUSTOMER.DISPUTE.")) {
     const id = event.resource?.dispute_id;
-    if (id) await saveDispute(await getDispute(id)); // re-fetch: webhook payloads can be partial
+    if (id) {
+      await saveDispute(await getDispute(id)); // re-fetch: webhook payloads can be partial
+      // New dispute: investigate in the background so the merchant opens it already analyzed.
+      if (event.event_type === "CUSTOMER.DISPUTE.CREATED") after(() => investigate(id).then(() => undefined));
+    }
   }
   return NextResponse.json({ ok: true });
 }

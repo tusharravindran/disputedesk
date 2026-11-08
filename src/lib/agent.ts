@@ -2,13 +2,13 @@
 import "server-only";
 import { z } from "zod";
 import { sql } from "@/lib/db";
-import { interact, type InteractionInput, type ToolDef } from "@/lib/llm";
+import { interact, LLMError, MODELS, type InteractionInput, type ToolDef } from "@/lib/llm";
 
 const SYSTEM = `You are DisputeDesk, an expert PayPal dispute analyst working for a small online merchant.
 Your job: investigate one PayPal dispute and recommend the response that protects the merchant's money while staying honest and fair to the buyer.
 
 Process:
-1. Call get_dispute first. Then gather evidence: get_order, get_shipment_tracking, get_buyer_history. Call each tool at most once.
+1. The dispute is given to you in the first message. Gather evidence by calling get_order, get_shipment_tracking and get_buyer_history TOGETHER in a single turn (parallel calls). Call each tool at most once. Only call get_dispute if you need to re-read the dispute.
 2. Weigh the evidence against the dispute reason:
    - MERCHANDISE_OR_SERVICE_NOT_RECEIVED: strongest evidence is carrier tracking showing delivery to the address on the transaction.
    - MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED: the listing description, photos and any buyer communication matter; tracking alone does not win it.
@@ -147,54 +147,99 @@ async function runTool(disputeId: string, name: string, args: Record<string, unk
 
 const MAX_TURNS = 8;
 
+export type AgentEvent =
+  | { type: "start"; runId: number }
+  | { type: "reset"; model: string }
+  | { type: "thinking"; turn: number }
+  | { type: "step"; entry: TraceEntry }
+  | { type: "done"; runId: number }
+  | { type: "error"; message: string };
+
 /** Runs the investigation, persisting progress to agent_runs so the UI can show the trace. */
-export async function investigate(disputeId: string): Promise<number> {
+export async function investigate(disputeId: string, onEvent: (e: AgentEvent) => void = () => {}): Promise<number> {
   const [run] = await sql`INSERT INTO agent_runs (dispute_id, status) VALUES (${disputeId}, 'running') RETURNING id`;
   const trace: TraceEntry[] = [];
   const save = (fields: Record<string, unknown>) =>
     sql`UPDATE agent_runs SET ${sql(fields)}, trace = ${sql.json(trace as never)} WHERE id = ${run.id}`;
+  onEvent({ type: "start", runId: run.id });
 
   try {
-    let input: InteractionInput = `Investigate dispute ${disputeId} and submit your recommendation.`;
-    let previousId: string | undefined;
-    let model: string | undefined;
+    // The dispute itself goes in the first message: saves a full model round trip (free tier = 20 req/day/model).
+    const t0 = Date.now();
+    const dispute = await runTool(disputeId, "get_dispute", {});
+    const loaded = { tool: "get_dispute", args: {}, result: dispute, ms: Date.now() - t0 };
 
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const it = await interact({ system: SYSTEM, tools: TOOLS, input, previousId, model });
-      previousId = it.id;
-      model = it.model; // stay on whichever model accepted the first turn
-
-      const calls = it.steps.filter((s) => s.type === "function_call") as Array<{
-        id: string; name: string; arguments: Record<string, unknown>;
-      }>;
-      if (calls.length === 0) throw new Error("Agent stopped without submitting a recommendation");
-
-      const final = calls.find((c) => c.name === "submit_recommendation");
-      if (final) {
-        const rec = Recommendation.parse(final.arguments);
-        trace.push({ tool: "submit_recommendation", args: {}, result: { verdict: rec.verdict }, ms: 0 });
-        await save({ status: "done", verdict: rec.verdict, confidence: rec.confidence, summary: rec.summary, draft: sql.json(rec), model });
-        return run.id;
+    let lastError: unknown;
+    for (const model of MODELS) {
+      trace.length = 0;
+      trace.push(loaded);
+      onEvent({ type: "reset", model });
+      onEvent({ type: "step", entry: loaded });
+      try {
+        return await runOnModel(model);
+      } catch (e) {
+        lastError = e;
+        // Quota or overload on this model: start over on the next free model.
+        if (e instanceof LLMError && (e.status === 429 || e.status === 503)) continue;
+        throw e;
       }
+    }
+    throw lastError instanceof LLMError && lastError.status === 429
+      ? new Error(`All free-tier AI models have used their daily quota. ${lastError.message}`)
+      : lastError;
 
-      const results = [];
-      for (const c of calls) {
-        const t0 = Date.now();
-        const result = await runTool(disputeId, c.name, c.arguments ?? {});
-        trace.push({ tool: c.name, args: c.arguments ?? {}, result, ms: Date.now() - t0 });
-        results.push({
-          type: "function_result" as const,
-          name: c.name,
-          call_id: c.id,
-          result: [{ type: "text" as const, text: JSON.stringify(result) }],
-        });
-      }
-      await save({ status: "running" });
-      input = results;
+    async function runOnModel(model: string): Promise<number> {
+      let input: InteractionInput = `Investigate this dispute and submit your recommendation.\n\nDispute (from PayPal):\n${JSON.stringify(dispute)}`;
+      let previousId: string | undefined;
+
+      for (let turn = 0; turn < MAX_TURNS; turn++) {
+        onEvent({ type: "thinking", turn });
+        const it = await interact({ system: SYSTEM, tools: TOOLS, input, previousId, model });
+        previousId = it.id;
+
+        const calls = it.steps.filter((s) => s.type === "function_call") as Array<{
+          id: string; name: string; arguments: Record<string, unknown>;
+        }>;
+        if (calls.length === 0) throw new Error("Agent stopped without submitting a recommendation");
+
+        const final = calls.find((c) => c.name === "submit_recommendation");
+        if (final) {
+          const rec = Recommendation.parse(final.arguments);
+          const entry = { tool: "submit_recommendation", args: {}, result: { verdict: rec.verdict }, ms: 0 };
+          trace.push(entry);
+          onEvent({ type: "step", entry });
+          await save({ status: "done", verdict: rec.verdict, confidence: rec.confidence, summary: rec.summary, draft: sql.json(rec), model, finished_at: new Date() });
+          onEvent({ type: "done", runId: run.id });
+          return run.id;
+        }
+
+        const results = [];
+        for (const c of calls) {
+          const t0 = Date.now();
+          // The dispute was already loaded up front; answer re-reads from memory without a duplicate trace step.
+          const reread = c.name === "get_dispute";
+          const result = reread ? dispute : await runTool(disputeId, c.name, c.arguments ?? {});
+          if (!reread) {
+            const entry = { tool: c.name, args: c.arguments ?? {}, result, ms: Date.now() - t0 };
+            trace.push(entry);
+            onEvent({ type: "step", entry });
+          }
+          results.push({
+            type: "function_result" as const,
+            name: c.name,
+            call_id: c.id,
+            result: [{ type: "text" as const, text: JSON.stringify(result) }],
+          });
+        }
+        await save({ status: "running" });
+        input = results;
     }
     throw new Error(`No recommendation after ${MAX_TURNS} turns`);
+    }
   } catch (e) {
-    await save({ status: "error", summary: e instanceof Error ? e.message : String(e) });
+    const message = e instanceof Error ? e.message : String(e);
+    await save({ status: "error", summary: message, finished_at: new Date() });
+    onEvent({ type: "error", message });
     return run.id;
   }
 }

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { sql } from "@/lib/db";
 import { REASONS } from "@/lib/reasons";
-import { Investigator, type Run } from "./investigator";
+import { Investigator, type Run, type SentAction } from "./investigator";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,9 @@ export default async function DisputePage({ params }: { params: Promise<{ id: st
   const [run] = await sql<Run[]>`
     SELECT id, status, verdict, confidence, summary, draft, trace, model
     FROM agent_runs WHERE dispute_id = ${id} ORDER BY id DESC LIMIT 1`;
+  const [sent] = await sql<SentAction[]>`
+    SELECT action, amount, status, created_at, message FROM dispute_actions
+    WHERE dispute_id = ${id} AND status <> 'failed' ORDER BY id DESC LIMIT 1`;
 
   const messages: Array<{ posted_by: string; time_posted: string; content: string }> = d.raw.messages ?? [];
   const items: Array<{ name: string; quantity: string }> = d.items ?? [];
@@ -41,7 +44,7 @@ export default async function DisputePage({ params }: { params: Promise<{ id: st
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-        <Investigator disputeId={d.id} initialRun={run ?? null} />
+        <Investigator disputeId={d.id} amount={Number(d.amount)} isDemo={d.is_demo} initialRun={run ?? null} sent={sent ?? null} />
 
         <aside className="space-y-4">
           <section className="rounded-xl border border-zinc-200 bg-white p-4">

@@ -3,8 +3,11 @@ import "server-only";
 
 const URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
-/** Primary model first; later entries are fallbacks when the free tier is overloaded or rate-limited. */
-export const MODELS = (process.env.GEMINI_MODELS ?? "gemini-3.6-flash,gemini-3.5-flash-lite")
+/**
+ * Primary model first; later entries are fallbacks. Free-tier quota is per model
+ * (e.g. 20 requests/day), so each fallback adds capacity.
+ */
+export const MODELS = (process.env.GEMINI_MODELS ?? "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.8-flash")
   .split(",")
   .map((m) => m.trim())
   .filter(Boolean);
@@ -51,8 +54,8 @@ async function call(model: string, body: Record<string, unknown>): Promise<Inter
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * One turn of an interaction. A conversation is pinned to the model that started it
- * (previous_interaction_id is model-scoped), so fallback only happens on the first turn.
+ * One turn of an interaction on one model. A conversation is pinned to the model that
+ * started it (previous_interaction_id is model-scoped), so model fallback lives in the agent.
  */
 export async function interact(opts: {
   model?: string;
@@ -67,24 +70,20 @@ export async function interact(opts: {
     input: opts.input,
     ...(opts.previousId ? { previous_interaction_id: opts.previousId } : {}),
   };
-  const candidates = opts.model ? [opts.model] : MODELS;
-  let last: unknown;
-  for (const model of candidates) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        return await call(model, body);
-      } catch (e) {
-        last = e;
-        const status = e instanceof LLMError ? e.status : 0;
-        if (status === 429 || status === 503 || status === 500 || status === 0) {
-          await sleep(1000 * 2 ** attempt);
-          continue; // retry same model, then move to the next one
-        }
-        throw e; // 4xx other than 429: a bug in our request, don't mask it
+  const model = opts.model ?? MODELS[0];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call(model, body);
+    } catch (e) {
+      const status = e instanceof LLMError ? e.status : 0;
+      // Brief overloads are worth a retry; quota errors (429) are not - the caller switches model.
+      if ((status === 503 || status === 500 || status === 0) && attempt < 2) {
+        await sleep(1500 * 2 ** attempt);
+        continue;
       }
+      throw e;
     }
   }
-  throw last;
 }
 
 export const outputText = (i: Interaction) =>

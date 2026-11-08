@@ -100,6 +100,31 @@ export const listDisputes = () =>
 
 export const getDispute = (id: string) => paypal<PP>(`/v1/customer/disputes/${id}`);
 
+export type EvidenceInput = {
+  evidence_type: string;
+  notes?: string;
+  evidence_info?: { tracking_info?: Array<{ carrier_name: string; tracking_number: string }> };
+};
+
+/** Provide evidence (multipart/form-data; the JSON payload goes in the "input" part). */
+export function provideEvidence(id: string, evidences: EvidenceInput[]) {
+  const form = new FormData();
+  form.append("input", new Blob([JSON.stringify({ evidences })], { type: "application/json" }));
+  return paypal<PP>(`/v1/customer/disputes/${id}/provide-evidence`, { method: "POST", form });
+}
+
+/** Accept the buyer's claim and refund. accept_claim_type must be listed in allowed_response_options. */
+export const acceptClaim = (id: string, note: string, acceptClaimType = "REFUND") =>
+  paypal<PP>(`/v1/customer/disputes/${id}/accept-claim`, {
+    body: { note, accept_claim_type: acceptClaimType },
+  });
+
+/** Offer a partial refund. Only valid while dispute_life_cycle_stage is INQUIRY. */
+export const makeOffer = (id: string, note: string, amount: { currency_code: string; value: string }) =>
+  paypal<PP>(`/v1/customer/disputes/${id}/make-offer`, {
+    body: { note, offer_amount: amount, offer_type: "REFUND" },
+  });
+
 // ---------- Webhooks v1 ----------
 export async function verifyWebhook(headers: Headers, rawBody: string): Promise<boolean> {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID;

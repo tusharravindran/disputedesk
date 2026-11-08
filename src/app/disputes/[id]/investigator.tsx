@@ -5,9 +5,15 @@ import { useState } from "react";
 
 type Evidence = { type: string; description: string; carrier?: string; tracking_number?: string };
 type Verdict = "fight" | "refund" | "offer";
+type Objection = { severity: "high" | "medium" | "low"; issue: string; fix: string; fixable_with_available_data: boolean };
+type Review = {
+  predicted_outcome: "SELLER_FAVOR" | "BUYER_FAVOR"; seller_win_probability: number; verdict_agrees: boolean;
+  reasoning: string; objections: Objection[];
+};
 type Draft = {
   verdict: Verdict; confidence: number; summary: string; facts?: Array<{ source: string; fact: string }>;
   evidence: Evidence[]; risks: string[]; offer_amount?: string; message_to_buyer: string;
+  reviews?: Array<{ verdict: Verdict; review: Review }>;
 };
 type TraceEntry = { tool: string; args: Record<string, unknown>; result: unknown; ms: number };
 export type Run = {
@@ -22,10 +28,76 @@ const TOOL_LABELS: Record<string, string> = {
   get_shipment_tracking: "Checked carrier tracking",
   get_buyer_history: "Looked up buyer history",
   fact_check: "Fact-checked against the data",
+  adjudicator_review: "Simulated PayPal reviewer approved the draft",
   submit_recommendation: "Wrote recommendation",
 };
 
 const failedCheck = (t: TraceEntry) => t.tool === "fact_check" && (t.result as { passed?: boolean })?.passed === false;
+const objected = (t: TraceEntry) => {
+  if (t.tool !== "adjudicator_review") return false;
+  const r = t.result as Review;
+  return !r.verdict_agrees || r.objections.some((o) => o.severity !== "low" && o.fixable_with_available_data);
+};
+const stepLabel = (t: TraceEntry) => {
+  if (failedCheck(t)) return "Fact-check caught a problem, AI corrected it";
+  if (objected(t)) {
+    const r = t.result as Review;
+    return `Simulated PayPal reviewer rejected the draft (${r.seller_win_probability}% win), sent back for revision`;
+  }
+  return TOOL_LABELS[t.tool] ?? t.tool;
+};
+
+const SEVERITY_STYLE = { high: "bg-red-100 text-red-700", medium: "bg-amber-100 text-amber-800", low: "bg-zinc-100 text-zinc-600" };
+
+function StressTest({ reviews, amount }: { reviews: NonNullable<Draft["reviews"]>; amount: number }) {
+  const first = reviews[0];
+  const last = reviews[reviews.length - 1];
+  const revised = reviews.length > 1;
+  const sellerWins = last.review.predicted_outcome === "SELLER_FAVOR";
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-500">Stress test · simulated PayPal reviewer</h3>
+        <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-medium ${sellerWins ? "bg-emerald-100 text-emerald-800" : "bg-zinc-200 text-zinc-700"}`}>
+          Predicted: {sellerWins ? "seller wins" : "buyer wins"}
+        </span>
+      </div>
+
+      {revised && (
+        <p className="mt-2 rounded-md bg-white p-2 text-sm">
+          First draft was <b className="capitalize">{first.verdict}</b>: the reviewer predicted a{" "}
+          <b>{first.review.seller_win_probability}%</b> chance of winning and objected. The AI revised it to{" "}
+          <b className="capitalize">{last.verdict}</b>
+          {first.verdict !== last.verdict && last.verdict === "refund" && (
+            <> and avoided fighting a case it would likely lose on ${amount.toFixed(2)}</>
+          )}
+          .
+        </p>
+      )}
+
+      <p className="mt-2 text-sm text-zinc-700">{last.review.reasoning}</p>
+      <p className="mt-1 text-xs text-zinc-500">
+        {last.verdict === "fight" || last.verdict === "offer"
+          ? `Chance PayPal rules for you if you send this: ${last.review.seller_win_probability}%`
+          : `Chance you would have won by fighting instead: ${last.review.seller_win_probability}%`}
+      </p>
+
+      {(revised ? first : last).review.objections.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {(revised ? first : last).review.objections.map((o, i) => (
+            <li key={i} className="text-sm">
+              <span className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${SEVERITY_STYLE[o.severity]}`}>{o.severity}</span>
+              {o.issue}
+              <div className="ml-12 text-xs text-zinc-500">
+                {revised ? "Addressed in revision. " : ""}Fix: {o.fix}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const VERDICT_STYLE: Record<Verdict, { label: string; cls: string; button: string }> = {
   fight: { label: "Fight with evidence", cls: "bg-emerald-600", button: "Submit evidence to PayPal" },
@@ -150,12 +222,12 @@ export function Investigator({
             {trace.map((t, i) => (
               <li key={i} className="animate-[fadein_.3s_ease-out] rounded-lg border border-zinc-100">
                 <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(open === i ? null : i)}>
-                  {failedCheck(t) ? (
+                  {failedCheck(t) || objected(t) ? (
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-xs text-amber-700">!</span>
                   ) : (
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700">✓</span>
                   )}
-                  <span>{failedCheck(t) ? "Fact-check caught a problem, AI corrected it" : (TOOL_LABELS[t.tool] ?? t.tool)}</span>
+                  <span>{stepLabel(t)}</span>
                   <span className="ml-auto font-mono text-xs text-zinc-400">{t.tool}</span>
                 </button>
                 {open === i && (
@@ -188,6 +260,8 @@ export function Investigator({
             </div>
           </div>
           <p className="text-sm">{draft.summary}</p>
+
+          {draft.reviews && draft.reviews.length > 0 && <StressTest reviews={draft.reviews} amount={amount} />}
 
           {draft.evidence.length > 0 && (
             <div>

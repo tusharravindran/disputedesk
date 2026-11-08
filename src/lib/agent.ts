@@ -3,6 +3,7 @@
 import "server-only";
 import { z } from "zod";
 import { sql } from "@/lib/db";
+import { adjudicate, needsRevision, type Review } from "@/lib/adjudicator";
 import { groundingProblems } from "@/lib/factcheck";
 import { interact, LLMError, MODELS, type InteractionInput, type ToolDef } from "@/lib/llm";
 
@@ -182,7 +183,8 @@ async function runTool(disputeId: string, name: string, args: Record<string, unk
   }
 }
 
-const MAX_TURNS = 6;
+const MAX_TURNS = 7;
+const DATA_TOOLS = new Set(["get_order", "get_shipment_tracking", "get_buyer_history"]);
 
 export type AgentEvent =
   | { type: "start"; runId: number }
@@ -241,6 +243,7 @@ export async function investigate(disputeId: string, onEvent: (e: AgentEvent) =>
         `<dispute source="PayPal">\n${JSON.stringify(dispute)}\n</dispute>`;
       let previousId: string | undefined;
       let corrections = 0;
+      const reviews: Array<{ verdict: string; review: Review }> = [];
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         onEvent({ type: "thinking", turn });
@@ -271,11 +274,32 @@ export async function investigate(disputeId: string, onEvent: (e: AgentEvent) =>
           const rec = parsed.data!;
           trace.push({ tool: "fact_check", args: {}, result: { passed: true, facts_checked: rec.facts.length }, ms: 0 });
           onEvent({ type: "step", entry: trace[trace.length - 1] });
+
+          const started = Date.now();
+          const evidence = trace.filter((t) => DATA_TOOLS.has(t.tool)).map((t) => ({ tool: t.tool, result: t.result }));
+          const review = await adjudicate(model, dispute, evidence, rec);
+          reviews.push({ verdict: rec.verdict, review });
+          trace.push({ tool: "adjudicator_review", args: { round: reviews.length }, result: review, ms: Date.now() - started });
+          onEvent({ type: "step", entry: trace[trace.length - 1] });
+
+          if (needsRevision(review) && reviews.length < 2) {
+            corrections = 0;
+            input = [fnResult(final, {
+              status: "revise",
+              message:
+                "A simulated PayPal dispute reviewer examined your draft. Address its objections using ONLY the data you already have " +
+                "(change the verdict if it is right that another option is better), then call submit_recommendation again. " +
+                "Do not invent evidence to satisfy an objection that cannot be fixed with available data.",
+              review,
+            })];
+            continue;
+          }
+
           trace.push({ tool: "submit_recommendation", args: {}, result: { verdict: rec.verdict }, ms: 0 });
           onEvent({ type: "step", entry: trace[trace.length - 1] });
           await save({
             status: "done", verdict: rec.verdict, confidence: rec.confidence, summary: rec.summary,
-            draft: sql.json(rec), model, finished_at: new Date(),
+            draft: sql.json({ ...rec, reviews } as never), model, finished_at: new Date(),
           });
           onEvent({ type: "done", runId: run.id });
           return run.id;

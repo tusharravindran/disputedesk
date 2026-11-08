@@ -12,6 +12,7 @@ Small merchants lose disputes they should win. They don't know which evidence Pa
 
 - **Live disputes from PayPal.** Disputes arrive by webhook (signature-verified) or a manual sync, and new disputes are investigated automatically in the background.
 - **An investigating agent, not a chatbot.** The agent calls tools to read the order, check shipment tracking and look up buyer history. You can watch each step live and expand it to see the exact data the agent read.
+- **Stress-tested by a second, adversarial agent.** Before the merchant sees a draft, a simulated PayPal dispute reviewer ([`src/lib/adjudicator.ts`](src/lib/adjudicator.ts)) argues the buyer's side, predicts the ruling and the seller's win probability, and raises objections, each with a severity and a fix. If its objections are serious, the investigator revises the draft once and the reviewer scores it again. In sample dispute `PP-D-DEMO-0005`, tracking says "delivered" but to a different city: the first draft says fight, the reviewer predicts a 5% chance of winning, and the AI switches to refund instead of fighting a case it would lose.
 - **A recommendation the merchant can act on.** It gives a verdict with calibrated confidence, the evidence to submit, the risks, the facts it relied on, and an editable message to the buyer.
 - **Human in the loop.** Nothing reaches PayPal until the merchant clicks approve. That single endpoint calls `provide-evidence`, `accept-claim` or `make-offer`. It is protected against double-submits, validates offers against the disputed amount, and enforces PayPal's stage rules.
 - **Impact at a glance.** The dashboard shows money at risk, money defended, disputes handled, and the agent's average investigation time.
@@ -41,6 +42,8 @@ flowchart LR
   subgraph Agent[Investigation agent]
     LLM[Gemini] <--> Tools[get_order<br/>get_shipment_tracking<br/>get_buyer_history]
     LLM --> FC[Fact-check]
+    FC --> ADJ[Adjudicator agent<br/>simulated PayPal reviewer]
+    ADJ -- objections --> LLM
   end
   Tools --> DB
   FC --> DB
@@ -59,7 +62,7 @@ flowchart LR
 
 **Stack:** Next.js 15 (App Router) and TypeScript, Tailwind CSS, PostgreSQL (`postgres.js`), Zod, and the Google Gemini Interactions API (free tier).
 
-The agent uses about 2–3 model requests per investigation: the dispute is sent up front, and the evidence tools are called in parallel. If a model's free-tier quota runs out mid-run, the investigation restarts on the next model in `GEMINI_MODELS`.
+The investigation uses about 3–5 model requests (including the adversarial review): the dispute is sent up front, and the evidence tools are called in parallel. If a model's free-tier quota runs out mid-run, the investigation restarts on the next model in `GEMINI_MODELS`.
 
 ## Run it locally
 
@@ -124,6 +127,7 @@ src/
       webhooks/paypal                webhook receiver
   lib/
     agent.ts                         prompt, tools, agent loop, model fallback
+    adjudicator.ts                   adversarial reviewer agent (simulated PayPal ruling)
     factcheck.ts                     deterministic grounding checks
     llm.ts                           Gemini Interactions API client
     paypal.ts                        PayPal REST client

@@ -159,3 +159,31 @@ export const addTracking = (captureId: string, trackingNumber: string, carrier: 
 
 export const listTrackers = (captureId: string) =>
   paypal<{ trackers?: Tracker[] }>(`/v1/shipping/trackers?transaction_id=${encodeURIComponent(captureId)}`).then((r) => r.trackers ?? []);
+
+export const WEBHOOK_EVENTS = ["CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"];
+
+/**
+ * Makes sure the given PayPal app sends dispute events to `url`, creating the webhook if needed.
+ * Uses explicit credentials so it can run before new keys are saved.
+ */
+export async function ensureWebhook(clientId: string, clientSecret: string, apiBase: string, url: string): Promise<string> {
+  const { access_token } = await requestToken(clientId, clientSecret, apiBase);
+  const call = async (path: string, init: RequestInit = {}) => {
+    const res = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new PayPalError(res.status, json, path);
+    return json;
+  };
+  const { webhooks = [] } = (await call("/v1/notifications/webhooks")) as { webhooks?: Array<{ id: string; url: string }> };
+  const existing = webhooks.find((w) => w.url === url);
+  if (existing) return existing.id;
+  const created = (await call("/v1/notifications/webhooks", {
+    method: "POST",
+    body: JSON.stringify({ url, event_types: WEBHOOK_EVENTS.map((name) => ({ name })) }),
+  })) as { id: string };
+  return created.id;
+}

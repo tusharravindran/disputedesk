@@ -94,7 +94,23 @@ Open a sample dispute and click **Investigate**. Sample disputes are labelled an
 
 ### Webhooks
 
-In your PayPal app's settings, add a webhook pointing to `https://<your-host>/api/webhooks/paypal` with the `CUSTOMER.DISPUTE.CREATED`, `CUSTOMER.DISPUTE.UPDATED` and `CUSTOMER.DISPUTE.RESOLVED` events. Put its ID in `PAYPAL_WEBHOOK_ID`. Events whose signature can't be verified are stored but not acted on.
+You don't need to set up webhooks by hand. When you save PayPal keys on the **Settings** page of a public HTTPS deployment, DisputeDesk uses PayPal's Webhooks API to create the webhook in your app (`CUSTOMER.DISPUTE.CREATED`, `UPDATED`, `RESOLVED` → `/api/webhooks/paypal`). It stores the webhook ID and verifies the signature of every event. Saving again reuses the existing webhook. Events whose signature can't be verified are stored but not acted on.
+
+## Try it with your own PayPal sandbox
+
+Judges and reviewers can connect their **own** PayPal sandbox app to the live demo and see DisputeDesk work on their own disputes:
+
+1. In the [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications/sandbox), create a **Sandbox → Merchant** app (US business account) and copy its **Client ID** and **Secret**.
+2. Open [disputedesk.tushar.pro/settings](https://disputedesk.tushar.pro/settings), paste both, leave **Webhook ID** empty, and enter the admin password:
+
+   ```
+   paypal-ai-judge-2026
+   ```
+
+3. Tick the confirmation box and click **Save & connect**. DisputeDesk checks the keys with PayPal, creates the webhook in your app, resets the demo workspace, re-adds the sample disputes, and syncs your account's disputes.
+4. Buy something in the [demo store](https://disputedesk.tushar.pro/store) with your sandbox buyer account, open a dispute at [sandbox.paypal.com](https://www.sandbox.paypal.com), and watch it arrive and get investigated automatically.
+
+When you're done, click **Use environment keys instead** on the Settings page to restore the default demo. The demo is shared, so connecting your app replaces it for everyone until it is restored. Only sandbox keys are accepted, and the secret is stored encrypted.
 
 ## Deploy (Render)
 
@@ -103,7 +119,7 @@ The repo includes a [Render Blueprint](render.yaml) that defines a free web serv
 1. In Render, choose **New → Blueprint**, connect this repo, and apply it.
 2. When prompted, enter `GEMINI_API_KEY` and an `ADMIN_PASSWORD`, plus `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` (or leave those empty and connect PayPal later on the Settings page). `SETTINGS_SECRET` is generated automatically.
 3. On first boot the app creates its tables and seeds the sample disputes (`SEED_DEMO=true`).
-4. Add a PayPal webhook pointing to `https://<your-app>.onrender.com/api/webhooks/paypal`, then set `PAYPAL_WEBHOOK_ID` in Render.
+4. Set `PUBLIC_URL` to your app's HTTPS address. The PayPal webhook is created automatically when keys are saved on the Settings page.
 
 ## Scripts
 

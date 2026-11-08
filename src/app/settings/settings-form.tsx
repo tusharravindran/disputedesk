@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type Result = { ok?: boolean; switched?: boolean; synced?: number; error?: string };
+type Result = { ok?: boolean; switched?: boolean; synced?: number; webhook?: string; error?: string };
+
+const REPO_URL = "https://github.com/tusharravindran/disputedesk";
 
 export function SettingsForm({ source, passwordRequired }: { source: "settings" | "environment" | "none"; passwordRequired: boolean }) {
   const router = useRouter();
@@ -63,13 +65,26 @@ export function SettingsForm({ source, passwordRequired }: { source: "settings" 
           <input className={input} type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} required autoComplete="new-password" />
         </label>
         <label className="block text-sm">
-          Webhook ID <span className="text-zinc-400">(optional, enables signature verification)</span>
-          <input className={input} value={webhookId} onChange={(e) => setWebhookId(e.target.value)} autoComplete="off" />
+          Webhook ID <span className="text-zinc-400">(optional)</span>
+          <input
+            className={input}
+            value={webhookId}
+            onChange={(e) => setWebhookId(e.target.value)}
+            placeholder="Leave empty: DisputeDesk creates the webhook in your PayPal app automatically"
+            autoComplete="off"
+          />
         </label>
         {passwordRequired && (
           <label className="block text-sm">
             Admin password
             <input className={input} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} required autoComplete="current-password" />
+            <span className="mt-1 block text-xs text-zinc-500">
+              Judges: the password is in the{" "}
+              <a href={`${REPO_URL}#try-it-with-your-own-paypal-sandbox`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+                README on GitHub
+              </a>
+              . Saving is only allowed with the correct password.
+            </span>
           </label>
         )}
 
@@ -103,7 +118,10 @@ export function SettingsForm({ source, passwordRequired }: { source: "settings" 
         <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
           {result.switched
             ? `Connected to the new PayPal app. Workspace reset, sample disputes re-added, ${result.synced ?? 0} real dispute(s) synced.`
-            : "Settings saved. Same PayPal app, so your data was kept."}
+            : result.webhook
+              ? "Settings saved. Same PayPal app, so your data was kept."
+              : "Switched back to the environment keys."}
+          {result.webhook && <span className="mt-1 block">Webhook: {result.webhook}.</span>}
         </p>
       )}
     </section>

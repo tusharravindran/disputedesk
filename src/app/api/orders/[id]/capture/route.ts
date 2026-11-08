@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
-import { captureOrder, getOrder, PayPalError } from "@/lib/paypal";
+import { addTracking, captureOrder, getOrder, PayPalError } from "@/lib/paypal";
 import { sql } from "@/lib/db";
 
 /** USPS-style 22-digit tracking number. */
@@ -21,7 +21,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const pu = full.purchase_units?.[0] ?? {};
 
   // The demo store has no warehouse: each order is marked as shipped and delivered immediately,
-  // to the address on the order, so the agent has realistic tracking evidence to work with.
+  // to the address on the order, and the tracking is registered with PayPal like a real merchant would.
   const tracking = {
     carrier: "USPS",
     number: trackingNumber(),
@@ -39,6 +39,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
             ${capture?.amount?.currency_code ?? "USD"}, ${sql.json(pu.items ?? [])},
             ${order.payer?.email_address ?? null}, ${sql.json(pu.shipping ?? null)}, ${sql.json(tracking)})
     ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, capture_id = EXCLUDED.capture_id`;
+
+  if (capture?.id)
+    await addTracking(capture.id, tracking.number, tracking.carrier, "DELIVERED").catch((e) =>
+      console.error("[capture] could not register tracking with PayPal", e),
+    );
 
   return NextResponse.json({ status: order.status, captureId: capture?.id });
 }

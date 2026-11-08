@@ -141,3 +141,16 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
 }
 
 export const getOrder = (id: string) => paypal<PP>(`/v2/checkout/orders/${id}`);
+
+export const getCapture = (id: string) => paypal<PP>(`/v2/payments/captures/${id}`);
+
+export type Tracker = { transaction_id: string; tracking_number: string; status: string; carrier: string; shipment_date?: string };
+
+/** Register shipment tracking with PayPal (Tracking API). It also counts toward PayPal Seller Protection. */
+export const addTracking = (captureId: string, trackingNumber: string, carrier: string, status: "SHIPPED" | "DELIVERED") =>
+  paypal<PP>("/v1/shipping/trackers-batch", {
+    body: { trackers: [{ transaction_id: captureId, tracking_number: trackingNumber, carrier, status }] },
+  });
+
+export const listTrackers = (captureId: string) =>
+  paypal<{ trackers?: Tracker[] }>(`/v1/shipping/trackers?transaction_id=${encodeURIComponent(captureId)}`).then((r) => r.trackers ?? []);

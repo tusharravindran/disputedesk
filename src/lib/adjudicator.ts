@@ -22,8 +22,11 @@ Your job: predict how PayPal would rule on the merchant's draft response, and fi
 - Not as described: proof of delivery does not help; the seller needs evidence about the item's condition or description. Without it the buyer usually wins.
 - Unauthorised: delivery to the account holder's address and prior good orders help.
 
-## seller_win_probability
-0-100: the chance PayPal rules for the seller if this exact response is submitted. For a refund or offer verdict, estimate the chance the seller would have won by fighting instead, so the merchant knows what they are giving up.
+## fight_win_probability
+Always answer the same question, whatever the merchant's verdict: "If the merchant contested this dispute with the evidence available, what is the chance (0-100) that PayPal rules for the seller?"
+- Delivered tracking to the order's address on a not-received claim: high (80-95).
+- No tracking, tracking to a different address, or a not-as-described claim without condition evidence: low (0-20).
+Your reasoning must agree with this number.
 
 Finish by calling submit_review exactly once.`;
 
@@ -35,8 +38,7 @@ const TOOLS: ToolDef[] = [
     parameters: {
       type: "object",
       properties: {
-        predicted_outcome: { type: "string", enum: ["SELLER_FAVOR", "BUYER_FAVOR"] },
-        seller_win_probability: { type: "integer" },
+        fight_win_probability: { type: "integer", description: "0-100, see instructions." },
         verdict_agrees: { type: "boolean", description: "Whether you agree the merchant's chosen verdict is their best option." },
         reasoning: { type: "string", description: "2-3 sentences, as a PayPal reviewer would write them." },
         objections: {
@@ -53,27 +55,33 @@ const TOOLS: ToolDef[] = [
           },
         },
       },
-      required: ["predicted_outcome", "seller_win_probability", "verdict_agrees", "reasoning", "objections"],
+      required: ["fight_win_probability", "verdict_agrees", "reasoning", "objections"],
     },
   },
 ];
 
-export const Review = z.object({
-  predicted_outcome: z.enum(["SELLER_FAVOR", "BUYER_FAVOR"]),
-  seller_win_probability: z.coerce.number().int().min(0).max(100),
-  verdict_agrees: z.boolean(),
-  reasoning: z.string(),
-  objections: z
-    .array(
-      z.object({
-        severity: z.enum(["high", "medium", "low"]),
-        issue: z.string(),
-        fix: z.string(),
-        fixable_with_available_data: z.boolean(),
-      }),
-    )
-    .default([]),
-});
+// The ruling a fight would get is derived from the probability, so the two can never disagree.
+export const Review = z
+  .object({
+    fight_win_probability: z.coerce.number().int().min(0).max(100),
+    verdict_agrees: z.boolean(),
+    reasoning: z.string(),
+    objections: z
+      .array(
+        z.object({
+          severity: z.enum(["high", "medium", "low"]),
+          issue: z.string(),
+          fix: z.string(),
+          fixable_with_available_data: z.boolean(),
+        }),
+      )
+      .default([]),
+  })
+  .transform((r) => ({
+    ...r,
+    seller_win_probability: r.fight_win_probability,
+    predicted_outcome: (r.fight_win_probability >= 50 ? "SELLER_FAVOR" : "BUYER_FAVOR") as "SELLER_FAVOR" | "BUYER_FAVOR",
+  }));
 export type Review = z.infer<typeof Review>;
 
 /** Objections worth sending the draft back to the investigator for. */

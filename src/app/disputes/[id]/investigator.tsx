@@ -59,7 +59,7 @@ function StressTest({ reviews, amount }: { reviews: NonNullable<Draft["reviews"]
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-500">Stress test · simulated PayPal reviewer</h3>
         <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-medium ${sellerWins ? "bg-emerald-100 text-emerald-800" : "bg-zinc-200 text-zinc-700"}`}>
-          Predicted: {sellerWins ? "seller wins" : "buyer wins"}
+          If you fight: {sellerWins ? "likely to win" : "likely to lose"} ({last.review.seller_win_probability}%)
         </span>
       </div>
 
@@ -78,8 +78,10 @@ function StressTest({ reviews, amount }: { reviews: NonNullable<Draft["reviews"]
       <p className="mt-2 text-sm text-zinc-700">{last.review.reasoning}</p>
       <p className="mt-1 text-xs text-zinc-500">
         {last.verdict === "fight" || last.verdict === "offer"
-          ? `Chance PayPal rules for you if you send this: ${last.review.seller_win_probability}%`
-          : `Chance you would have won by fighting instead: ${last.review.seller_win_probability}%`}
+          ? `Chance PayPal rules for you if you send this evidence: ${last.review.seller_win_probability}%`
+          : `Chance you would win by fighting instead: ${last.review.seller_win_probability}%. ${
+              last.review.seller_win_probability < 50 ? "Refunding avoids a likely loss." : "Consider fighting instead."
+            }`}
       </p>
 
       {(revised ? first : last).review.objections.length > 0 && (

@@ -45,3 +45,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   trace        JSONB NOT NULL DEFAULT '[]',  -- tool calls for the trace view
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- v2
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE disputes   ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE orders     ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;

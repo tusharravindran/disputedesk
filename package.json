@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/migrate.mjs && next start",
     "lint": "eslint",
-    "db:setup": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -f db/schema.sql",
-    "db:seed": "psql \"${DATABASE_URL:-postgres://localhost:5432/disputedesk}\" -v ON_ERROR_STOP=1 -q -f db/seed-demo.sql",
+    "db:setup": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "db:seed": "node --env-file-if-exists=.env scripts/migrate.mjs --seed",
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
   },
   "dependencies": {
@@ -31,5 +31,8 @@
     "eslint-config-next": "15.5.4",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

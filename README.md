@@ -88,15 +88,24 @@ Open a sample dispute and click **Investigate**. Sample disputes are labelled an
 
 In your PayPal app's settings, add a webhook pointing to `https://<your-host>/api/webhooks/paypal` with the `CUSTOMER.DISPUTE.CREATED`, `CUSTOMER.DISPUTE.UPDATED` and `CUSTOMER.DISPUTE.RESOLVED` events. Put its ID in `PAYPAL_WEBHOOK_ID`. Events whose signature can't be verified are stored but not acted on.
 
+## Deploy (Render)
+
+The repo includes a [Render Blueprint](render.yaml) that defines a free web service and a free PostgreSQL database.
+
+1. In Render, choose **New → Blueprint**, connect this repo, and apply it.
+2. When prompted, enter `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `GEMINI_API_KEY`.
+3. On first boot the app creates its tables and seeds the sample disputes (`SEED_DEMO=true`).
+4. Add a PayPal webhook pointing to `https://<your-app>.onrender.com/api/webhooks/paypal`, then set `PAYPAL_WEBHOOK_ID` in Render.
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start the dev server |
-| `npm run build` / `npm start` | Production build and serve |
+| `npm run build` / `npm start` | Production build; start applies migrations, then serves |
 | `npm test` | Unit tests for the fact-checker |
 | `npm run lint` | ESLint |
-| `npm run db:setup` | Apply `db/schema.sql` (idempotent) |
+| `npm run db:setup` | Apply `db/schema.sql` (idempotent, no `psql` needed) |
 | `npm run db:seed` | Reset the sample disputes |
 
 ## Project structure

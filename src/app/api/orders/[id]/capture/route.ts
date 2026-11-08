@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
-import { captureOrder, PayPalError } from "@/lib/paypal";
+import { captureOrder, getOrder, PayPalError } from "@/lib/paypal";
 import { sql } from "@/lib/db";
 
 /** USPS-style 22-digit tracking number. */
@@ -15,8 +15,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const details = e instanceof PayPalError ? e.body : String(e);
     return NextResponse.json({ error: "capture failed", details }, { status: 502 });
   }
-  const pu = order.purchase_units?.[0] ?? {};
-  const capture = pu.payments?.captures?.[0];
+  const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
+  // The capture response omits line items; the full order has them.
+  const full = await getOrder(id).catch(() => order);
+  const pu = full.purchase_units?.[0] ?? {};
 
   // The demo store has no warehouse: each order is marked as shipped and delivered immediately,
   // to the address on the order, so the agent has realistic tracking evidence to work with.

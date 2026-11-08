@@ -139,3 +139,5 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
   });
   return res.verification_status === "SUCCESS";
 }
+
+export const getOrder = (id: string) => paypal<PP>(`/v2/checkout/orders/${id}`);
